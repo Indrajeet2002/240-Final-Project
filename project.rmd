@@ -1,0 +1,32 @@
+> # Load required packages
+> library(ggplot2)
+> library(ggrepel)
+> 
+> # Load your dataset
+> df <- read.csv("~/Downloads/champs_and_runner_ups_series_averages.csv")
+> 
+> # Filter only Champions
+> champions <- subset(df, Status == "Champion")
+> 
+> # Add 3P% safely
+> champions$TP_Percent <- with(champions, ifelse(TPA > 0, TP / TPA * 100, NA))
+> 
+> # Create a label column
+> champions$Label <- paste(champions$Team, champions$Year)
+> 
+> # Identify notable teams
+> low_3pt <- subset(champions, TP < quantile(champions$TP, 0.05) & TPA < quantile(champions$TPA, 0.05))
+> high_3pt <- subset(champions, TP > quantile(champions$TP, 0.95) & TPA > quantile(champions$TPA, 0.95))
+> 
+> # Combine for labeling
+> notable <- rbind(low_3pt, high_3pt)
+> 
+> # Plot
+> ggplot(champions, aes(x = TPA, y = TP)) +
++     geom_point(color = "steelblue", size = 3) +
++     geom_text_repel(data = notable, aes(label = Label), size = 3, color = "black") +
++     labs(title = "3-Point Shooting of NBA Champions",
++          x = "3-Point Attempts per Game",
++          y = "3-Point Makes per Game") +
++     theme_minimal()
+> 
