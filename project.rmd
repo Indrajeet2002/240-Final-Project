@@ -1,32 +1,307 @@
-> # Load required packages
-> library(ggplot2)
-> library(ggrepel)
-> 
-> # Load your dataset
-> df <- read.csv("~/Downloads/champs_and_runner_ups_series_averages.csv")
-> 
-> # Filter only Champions
-> champions <- subset(df, Status == "Champion")
-> 
-> # Add 3P% safely
-> champions$TP_Percent <- with(champions, ifelse(TPA > 0, TP / TPA * 100, NA))
-> 
-> # Create a label column
-> champions$Label <- paste(champions$Team, champions$Year)
-> 
-> # Identify notable teams
-> low_3pt <- subset(champions, TP < quantile(champions$TP, 0.05) & TPA < quantile(champions$TPA, 0.05))
-> high_3pt <- subset(champions, TP > quantile(champions$TP, 0.95) & TPA > quantile(champions$TPA, 0.95))
-> 
-> # Combine for labeling
-> notable <- rbind(low_3pt, high_3pt)
-> 
-> # Plot
-> ggplot(champions, aes(x = TPA, y = TP)) +
-+     geom_point(color = "steelblue", size = 3) +
-+     geom_text_repel(data = notable, aes(label = Label), size = 3, color = "black") +
-+     labs(title = "3-Point Shooting of NBA Champions",
-+          x = "3-Point Attempts per Game",
-+          y = "3-Point Makes per Game") +
-+     theme_minimal()
-> 
+
+```{r setup, include=FALSE}
+# Load required packages
+library(ggplot2)
+library(corrplot)
+library(ggrepel)
+library(gridExtra)
+library(MASS)
+library(Hotelling)
+library(factoextra)
+library(FactoMineR)
+library(reshape2)
+```
+
+```{r}
+library(dplyr)
+# Load your dataset
+df <- read.csv("~/Downloads/champs_and_runner_ups_series_averages.csv")
+
+# # Filter only Champions
+# champions <- subset(df, Status == "Champion")
+# 
+# # Add 3P% safely
+# champions$TP_Percent <- with(champions, ifelse(TPA > 0, TP / TPA * 100, NA))
+# 
+# # Create a label column
+# champions$Label <- paste(champions$Team, champions$Year)
+#  
+# # Identify notable teams
+# low_3pt <- subset(champions, TP < quantile(champions$TP, 0.05) & TPA < quantile(champions$TPA, 0.05))
+# high_3pt <- subset(champions, TP > quantile(champions$TP, 0.95) & TPA > quantile(champions$TPA, 0.95))
+# 
+# # Combine for labeling
+# notable <- rbind(low_3pt, high_3pt)
+# 
+# # Plot
+# ggplot(champions, aes(x = TPA, y = TP)) +
+#   geom_point(color = "steelblue", size = 3) +
+#   geom_text_repel(data = notable, aes(label = Label), size = 3, color = "black") +
+#   labs(title = "3-Point Shooting of NBA Champions",
+#        x = "3-Point Attempts per Game",
+#        y = "3-Point Makes per Game") +
+#   theme_minimal()
+
+
+# Data preprocessing
+df <- df %>%
+  select(-X) %>%
+  mutate(
+    FG_Percent = (FG / FGA) * 100,
+    TP_Percent = ifelse(TPA > 0, (TP / TPA) * 100, 0),
+    FT_Percent = ifelse(FTA > 0, (FT / FTA) * 100, 0),
+    Offensive_Rating = PTS / FGA,
+    Turnover_Rate = TOV / (FGA + 0.44 * FTA + TOV),
+    Champion = ifelse(Status == "Champion", 1, 0)
+  )
+
+# Select key variables for analysis
+analysis_vars <- c("PTS", "FG", "FGA", "TP", "TPA", "FT", "FTA", 
+                   "ORB", "DRB", "TRB", "AST", "STL", "BLK", "TOV", "PF",
+                   "FG_Percent", "TP_Percent", "FT_Percent")
+
+# Select key variables for analysis
+analysis_vars <- c("PTS", "FG", "FGA", "TP", "TPA", "FT", "FTA", 
+                   "ORB", "DRB", "TRB", "AST", "STL", "BLK", "TOV", "PF",
+                   "FG_Percent", "TP_Percent", "FT_Percent")
+```
+
+```{r}
+# =============================================
+# 1. EXPLORATORY DATA ANALYSIS
+# =============================================
+
+# Summary statistics by status
+print("=== Summary Statistics by Status ===")
+summary_stats <- df %>%
+  group_by(Status) %>%
+  summarise_at(vars(analysis_vars), list(mean = mean, sd = sd), na.rm = TRUE)
+print(summary_stats)
+
+# Correlation matrix
+cor_matrix <- cor(df[analysis_vars], use = "complete.obs")
+
+# Correlation heatmap
+png("correlation_heatmap.png", width = 12, height = 10, units = "in", res = 300)
+corrplot(cor_matrix, method = "color", type = "upper", 
+         order = "hclust", tl.cex = 0.8, tl.col = "black")
+dev.off()
+
+# Box plots for key variables
+create_boxplot <- function(var_name) {
+  ggplot(df, aes(x = Status, y = get(var_name), fill = Status)) +
+    geom_boxplot(alpha = 0.7) +
+    geom_jitter(width = 0.2, alpha = 0.5) +
+    labs(title = paste("Distribution of", var_name, "by Status"),
+         y = var_name, x = "Status") +
+    theme_minimal() +
+    scale_fill_manual(values = c("Champion" = "gold", "Runner Up" = "lightblue"))
+}
+
+# Create box plots for key variables
+key_vars <- c("PTS", "TP", "TPA", "STL", "BLK", "TOV", "AST")
+plot_list <- lapply(key_vars, create_boxplot)
+
+# Arrange plots
+png("boxplots_comparison.png", width = 15, height = 12, units = "in", res = 300)
+do.call(grid.arrange, c(plot_list, ncol = 3))
+dev.off()
+
+```
+
+```{r}
+
+# =============================================
+# 2. HOTELLING'S T-TEST
+# =============================================
+
+print("=== Hotelling's T-Test Analysis ===")
+
+# Prepare data for Hotelling's test
+champions <- df[df$Status == "Champion", analysis_vars]
+runners_up <- df[df$Status == "Runner Up", analysis_vars]
+
+# Remove any rows with missing values
+champions <- champions[complete.cases(champions), ]
+runners_up <- runners_up[complete.cases(runners_up), ]
+
+# Perform Hotelling's T-test
+hotelling_result <- hotel.test(champions, runners_up)
+print(hotelling_result)
+
+# Individual t-tests for each variable
+print("=== Individual Variable Comparisons ===")
+t_test_results <- data.frame(
+  Variable = character(),
+  t_statistic = numeric(),
+  p_value = numeric(),
+  Champion_Mean = numeric(),
+  RunnerUp_Mean = numeric(),
+  Difference = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for(var in analysis_vars) {
+  t_result <- t.test(champions[[var]], runners_up[[var]])
+  t_test_results <- rbind(t_test_results, data.frame(
+    Variable = var,
+    t_statistic = t_result$statistic,
+    p_value = t_result$p.value,
+    Champion_Mean = mean(champions[[var]], na.rm = TRUE),
+    RunnerUp_Mean = mean(runners_up[[var]], na.rm = TRUE),
+    Difference = mean(champions[[var]], na.rm = TRUE) - mean(runners_up[[var]], na.rm = TRUE)
+  ))
+}
+
+# Sort by p-value
+t_test_results <- t_test_results[order(t_test_results$p_value), ]
+print(t_test_results)
+
+```
+
+```{r}
+
+# =============================================
+# 3. PRINCIPAL COMPONENT ANALYSIS (PCA)
+# =============================================
+
+print("=== Principal Component Analysis ===")
+
+# Prepare data for PCA (standardize variables)
+pca_data <- df[complete.cases(df[analysis_vars]), analysis_vars]
+pca_data_scaled <- scale(pca_data)
+
+# Perform PCA
+pca_result <- PCA(pca_data_scaled, graph = FALSE)
+
+# Print PCA summary
+print(summary(pca_result))
+
+# Scree plot
+png("pca_scree_plot.png", width = 10, height = 6, units = "in", res = 300)
+fviz_eig(pca_result, addlabels = TRUE, ylim = c(0, 30))
+dev.off()
+
+# Biplot
+png("pca_biplot.png", width = 12, height = 10, units = "in", res = 300)
+fviz_pca_biplot(pca_result, 
+                col.ind = df[complete.cases(df[analysis_vars]), "Status"],
+                palette = c("gold", "lightblue"),
+                addEllipses = TRUE,
+                label = "var",
+                col.var = "black",
+                repel = TRUE)
+dev.off()
+
+# Variable contributions to PC1 and PC2
+print("=== Variable Contributions to Principal Components ===")
+var_contrib <- pca_result$var$contrib
+print("Top contributors to PC1:")
+print(sort(var_contrib[,1], decreasing = TRUE)[1:8])
+print("Top contributors to PC2:")
+print(sort(var_contrib[,2], decreasing = TRUE)[1:8])
+
+```
+
+```{r}
+# =============================================
+# 4. LINEAR DISCRIMINANT ANALYSIS (LDA)
+# =============================================
+
+print("=== Linear Discriminant Analysis ===")
+
+# Prepare data for LDA
+lda_data <- df[complete.cases(df[c(analysis_vars, "Status")]), c(analysis_vars, "Status")]
+
+# Perform LDA
+lda_result <- lda(Status ~ ., data = lda_data[, c(analysis_vars, "Status")])
+print(lda_result)
+
+# LDA predictions
+lda_pred <- predict(lda_result)
+
+# Confusion matrix
+confusion_matrix <- table(Actual = lda_data$Status, Predicted = lda_pred$class)
+print("=== LDA Confusion Matrix ===")
+print(confusion_matrix)
+
+# Classification accuracy
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("LDA Classification Accuracy:", round(accuracy * 100, 2), "%"))
+
+# Plot LDA results
+lda_plot_data <- data.frame(
+  LD1 = lda_pred$x[,1],
+  Status = lda_data$Status,
+  Team = df[complete.cases(df[c(analysis_vars, "Status")]), "Team"],
+  Year = df[complete.cases(df[c(analysis_vars, "Status")]), "Year"]
+)
+
+png("lda_plot.png", width = 12, height = 8, units = "in", res = 300)
+ggplot(lda_plot_data, aes(x = LD1, y = 0, color = Status)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_density(aes(y = ..density..), alpha = 0.3) +
+  labs(title = "Linear Discriminant Analysis Results",
+       x = "Linear Discriminant 1",
+       y = "Density") +
+  scale_color_manual(values = c("Champion" = "gold", "Runner Up" = "lightblue")) +
+  theme_minimal()
+dev.off()
+
+# Variable importance in LDA
+print("=== LDA Coefficients (Variable Importance) ===")
+lda_coeffs <- data.frame(
+  Variable = names(lda_result$scaling[,1]),
+  Coefficient = lda_result$scaling[,1]
+)
+lda_coeffs <- lda_coeffs[order(abs(lda_coeffs$Coefficient), decreasing = TRUE), ]
+print(lda_coeffs)
+```
+
+```{r}
+# =============================================
+# 5. SUMMARY AND INSIGHTS
+# =============================================
+
+print("=== KEY FINDINGS SUMMARY ===")
+
+# Most discriminating variables from t-tests
+top_discriminators <- head(t_test_results, 5)
+print("Top 5 variables that differentiate Champions from Runner-ups:")
+print(top_discriminators[, c("Variable", "p_value", "Difference")])
+
+# PCA insights
+print(paste("PC1 explains", round(pca_result$eig[1,2], 1), "% of variance"))
+print(paste("PC2 explains", round(pca_result$eig[2,2], 1), "% of variance"))
+
+# Create a final summary plot
+png("championship_factors_summary.png", width = 15, height = 10, units = "in", res = 300)
+
+# Subplot 1: Most important variables (from t-tests)
+p1 <- ggplot(head(t_test_results, 8), aes(x = reorder(Variable, abs(Difference)), y = Difference)) +
+  geom_col(fill = "steelblue", alpha = 0.7) +
+  coord_flip() +
+  labs(title = "Mean Differences: Champions vs Runner-ups",
+       x = "Variable", y = "Difference (Champions - Runner-ups)") +
+  theme_minimal()
+
+# Subplot 2: PCA variable loadings
+pc1_loadings <- data.frame(
+  Variable = rownames(pca_result$var$coord),
+  PC1_Loading = pca_result$var$coord[,1]
+)
+pc1_loadings <- pc1_loadings[order(abs(pc1_loadings$PC1_Loading), decreasing = TRUE), ]
+
+p2 <- ggplot(head(pc1_loadings, 8), aes(x = reorder(Variable, abs(PC1_Loading)), y = PC1_Loading)) +
+  geom_col(fill = "darkgreen", alpha = 0.7) +
+  coord_flip() +
+  labs(title = "PC1 Variable Loadings",
+       x = "Variable", y = "PC1 Loading") +
+  theme_minimal()
+
+grid.arrange(p1, p2, ncol = 2)
+dev.off()
+
+print("Analysis complete! Check the generated PNG files for visualizations.")
+
+```
