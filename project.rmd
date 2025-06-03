@@ -118,46 +118,34 @@ dev.off()
 
 print("=== Hotelling's T-Test Analysis ===")
 
-# Prepare data for Hotelling's test
-champions <- df[df$Status == "Champion", analysis_vars]
-runners_up <- df[df$Status == "Runner Up", analysis_vars]
+Hotelling.T2.2sample=function(X, Y){
+n=dim(X)[1]; m=dim(Y)[1]; p=dim(X)[2]
+if(p!= dim(Y)[2]) return("Error: the dimensions of X and Y are not the same")
+X.bar=colMeans(X); Y.bar=colMeans(Y)
+X.S=cov(X); Y.S=cov(Y)
+pooled.S=((n-1)*X.S+(m-1)*Y.S)/(m+n-2)
+T2=t(X.bar-Y.bar)%*%solve((1/n+1/m)*pooled.S)%*%(X.bar-Y.bar)
+p.value=1-pf(T2/((n+m-2)*p/(n+m-1-p)),p,n+m-1-p)
+return(list(X.bar=X.bar, Y.bar=Y.bar, T2=T2, p.value=p.value))}
 
-# Remove any rows with missing values
-champions <- champions[complete.cases(champions), ]
-runners_up <- runners_up[complete.cases(runners_up), ]
+df1 <- read.csv("~/Downloads/champs_series_averages.csv")
+df2 <- read.csv("~/Downloads/runner_ups_series_averages.csv")
 
-# Perform Hotelling's T-test
-hotelling_result <- hotel.test(champions, runners_up)
-print(hotelling_result)
+champs_numeric <- df1[, -(1:4)]
+champs_matrix <- as.matrix(champs_numeric)
 
-# Individual t-tests for each variable
-print("=== Individual Variable Comparisons ===")
-t_test_results <- data.frame(
-  Variable = character(),
-  t_statistic = numeric(),
-  p_value = numeric(),
-  Champion_Mean = numeric(),
-  RunnerUp_Mean = numeric(),
-  Difference = numeric(),
-  stringsAsFactors = FALSE
-)
+runners_numeric <- df2[, -(1:4)]
+runners_matrix <- as.matrix(runners_numeric)
 
-for(var in analysis_vars) {
-  t_result <- t.test(champions[[var]], runners_up[[var]])
-  t_test_results <- rbind(t_test_results, data.frame(
-    Variable = var,
-    t_statistic = t_result$statistic,
-    p_value = t_result$p.value,
-    Champion_Mean = mean(champions[[var]], na.rm = TRUE),
-    RunnerUp_Mean = mean(runners_up[[var]], na.rm = TRUE),
-    Difference = mean(champions[[var]], na.rm = TRUE) - mean(runners_up[[var]], na.rm = TRUE)
-  ))
-}
+cols_to_keep <- c("PTS", "TP", "FT", "ORB", "DRB", "AST", "STL", "BLK", "TOV")
 
-# Sort by p-value
-t_test_results <- t_test_results[order(t_test_results$p_value), ]
-print(t_test_results)
+champs_sub <- champs_numeric[, cols_to_keep]
+runners_sub <- runners_numeric[, cols_to_keep]
 
+champs_matrix <- as.matrix(champs_sub)
+runners_matrix <- as.matrix(runners_sub)
+
+Hotelling.T2.2sample(champs_matrix, runners_matrix)
 ```
 
 ```{r}
