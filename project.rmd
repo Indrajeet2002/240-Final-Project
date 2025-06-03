@@ -17,35 +17,36 @@ library(dplyr)
 # Load your dataset
 df <- read.csv("~/Downloads/champs_and_runner_ups_series_averages.csv")
 
-# # Filter only Champions
-# champions <- subset(df, Status == "Champion")
-# 
-# # Add 3P% safely
-# champions$TP_Percent <- with(champions, ifelse(TPA > 0, TP / TPA * 100, NA))
-# 
-# # Create a label column
-# champions$Label <- paste(champions$Team, champions$Year)
-#  
-# # Identify notable teams
-# low_3pt <- subset(champions, TP < quantile(champions$TP, 0.05) & TPA < quantile(champions$TPA, 0.05))
-# high_3pt <- subset(champions, TP > quantile(champions$TP, 0.95) & TPA > quantile(champions$TPA, 0.95))
-# 
-# # Combine for labeling
-# notable <- rbind(low_3pt, high_3pt)
-# 
-# # Plot
-# ggplot(champions, aes(x = TPA, y = TP)) +
-#   geom_point(color = "steelblue", size = 3) +
-#   geom_text_repel(data = notable, aes(label = Label), size = 3, color = "black") +
-#   labs(title = "3-Point Shooting of NBA Champions",
-#        x = "3-Point Attempts per Game",
-#        y = "3-Point Makes per Game") +
-#   theme_minimal()
+# Filter only Champions
+champions <- subset(df, Status == "Champion")
+
+# Add 3P% safely
+champions$TP_Percent <- with(champions, ifelse(TPA > 0, TP / TPA * 100, NA))
+
+# Create a label column
+champions$Label <- paste(champions$Team, champions$Year)
+
+# Identify notable teams
+low_3pt <- subset(champions, TP < quantile(champions$TP, 0.05) & TPA < quantile(champions$TPA, 0.05))
+high_3pt <- subset(champions, TP > quantile(champions$TP, 0.95) & TPA > quantile(champions$TPA, 0.95))
+
+# Combine for labeling
+notable <- rbind(low_3pt, high_3pt)
+
+# Plot
+plot(1:10, 1:10, pch=2, col="red")
+ggplot(champions, aes(x = TPA, y = TP)) +
+  geom_point(color = "steelblue", size = 3)
+  geom_text_repel(data = notable, aes(label = Label), size = 3, color = "black") +
+  labs(title = "3-Point Shooting of NBA Champions",
+       x = "3-Point Attempts per Game",
+       y = "3-Point Makes per Game") +
+  theme_minimal()
 
 
 # Data preprocessing
 df <- df %>%
-  select(-X) %>%
+  #select(-X) %>%
   mutate(
     FG_Percent = (FG / FGA) * 100,
     TP_Percent = ifelse(TPA > 0, (TP / TPA) * 100, 0),
@@ -244,7 +245,7 @@ ggplot(lda_plot_data, aes(x = LD1, y = 0, color = Status)) +
   labs(title = "Linear Discriminant Analysis Results",
        x = "Linear Discriminant 1",
        y = "Density") +
-  scale_color_manual(values = c("Champion" = "gold", "Runner Up" = "lightblue")) +
+  scale_color_manual(values = c("Champion" = "black", "Runner Up" = "red")) +
   theme_minimal()
 dev.off()
 
@@ -266,7 +267,7 @@ print(lda_coeffs)
 print("=== KEY FINDINGS SUMMARY ===")
 
 # Most discriminating variables from t-tests
-top_discriminators <- head(t_test_results, 5)
+#top_discriminators <- head(t_test_results, 5)
 print("Top 5 variables that differentiate Champions from Runner-ups:")
 print(top_discriminators[, c("Variable", "p_value", "Difference")])
 
