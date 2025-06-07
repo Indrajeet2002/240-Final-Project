@@ -33,7 +33,7 @@ high_3pt <- subset(champions, TP > quantile(champions$TP, 0.95) & TPA > quantile
 # Combine for labeling
 notable <- rbind(low_3pt, high_3pt)
 
-# Plot
+Plot
 plot(1:10, 1:10, pch=2, col="red")
 ggplot(champions, aes(x = TPA, y = TP)) +
   geom_point(color = "steelblue", size = 3)
@@ -245,6 +245,252 @@ lda_coeffs <- data.frame(
 )
 lda_coeffs <- lda_coeffs[order(abs(lda_coeffs$Coefficient), decreasing = TRUE), ]
 print(lda_coeffs)
+```
+```{r}
+# =============================================
+# MANOVA: Basketball Statistics Across Eras
+# =============================================
+
+# Load required libraries
+library(ggplot2)
+library(car)       # For MANOVA functions
+library(broom)     # For tidy output
+
+# Note: dplyr and data preprocessing already done in previous code
+
+# =============================================
+# 1. CREATE ERA VARIABLE
+# =============================================
+print("=== Creating Era Categories ===")
+
+# Create era categories based on year
+df <- df %>%
+  mutate(Era = case_when(
+    Year >= 1980 & Year <= 1989 ~ "1980s",
+    Year >= 1990 & Year <= 1999 ~ "1990s", 
+    Year >= 2000 & Year <= 2009 ~ "2000s",
+    Year >= 2010 & Year <= 2019 ~ "2010s",
+    Year >= 2020 ~ "2020s",
+    TRUE ~ "Other"
+  ))
+
+# Convert Era to factor with proper ordering
+df$Era <- factor(df$Era, levels = c("1980s", "1990s", "2000s", "2010s", "2020s"))
+
+# Check era distribution
+era_counts <- table(df$Era)
+print("Teams per Era:")
+print(era_counts)
+
+# =============================================
+# 2. SELECT VARIABLES FOR MANOVA
+# =============================================
+print("=== Selecting Variables for MANOVA ===")
+
+# Remove highly correlated variables to avoid multicollinearity
+# Keep either raw counts OR percentages, not both
+manova_vars <- c("PTS", "TP", "FT", "ORB", "DRB", "AST", "STL", "BLK", "TOV")
+
+# Alternative: Use only raw stats (uncomment if you prefer)
+# manova_vars <- c("PTS", "FG", "FGA", "TP", "TPA", "FT", "FTA", 
+#                  "ORB", "DRB", "TRB", "AST", "STL", "BLK", "TOV", "PF")
+
+print(paste("Using", length(manova_vars), "variables for MANOVA:"))
+print(manova_vars)
+
+# Create complete cases dataset
+manova_data <- df[complete.cases(df[c(manova_vars, "Era")]), c(manova_vars, "Era", "Year", "Team", "Status")]
+
+print(paste("Complete cases for analysis:", nrow(manova_data)))
+print("Final era distribution:")
+print(table(manova_data$Era))
+
+# Check for multicollinearity
+print("=== Checking for Multicollinearity ===")
+cor_matrix <- cor(manova_data[manova_vars], use = "complete.obs")
+high_cor <- which(abs(cor_matrix) > 0.95 & cor_matrix != 1, arr.ind = TRUE)
+if(nrow(high_cor) > 0) {
+  print("High correlations found (>0.95):")
+  for(i in 1:nrow(high_cor)) {
+    var1 <- rownames(cor_matrix)[high_cor[i,1]]
+    var2 <- colnames(cor_matrix)[high_cor[i,2]]
+    correlation <- cor_matrix[high_cor[i,1], high_cor[i,2]]
+    print(paste(var1, "vs", var2, ":", round(correlation, 3)))
+  }
+} else {
+  print("No problematic multicollinearity detected")
+}
+
+# =============================================
+# 3. PERFORM MANOVA TEST
+# =============================================
+print("=== MANOVA Analysis ===")
+
+# Create the MANOVA model
+manova_formula <- as.formula(paste("cbind(", paste(manova_vars, collapse = ", "), ") ~ Era"))
+manova_result <- manova(manova_formula, data = manova_data)
+
+# Print MANOVA results
+print("MANOVA Results:")
+print(summary(manova_result))
+
+# Test assumptions - Multivariate normality (Box's M test)
+print("=== Testing Assumptions ===")
+if(require(heplots, quietly = TRUE)) {
+  boxm_result <- boxM(manova_data[manova_vars], manova_data$Era)
+  print("Box's M Test for Homogeneity of Covariance Matrices:")
+  print(boxm_result)
+} else {
+  print("Install 'heplots' package for Box's M test")
+}
+
+# =============================================
+# 4. FOLLOW-UP UNIVARIATE TESTS
+# =============================================
+print("=== Univariate ANOVA Follow-up Tests ===")
+
+# If MANOVA is significant, perform univariate ANOVAs
+manova_summary <- summary(manova_result)
+if(manova_summary$stats[1,6] < 0.05) {  # Check p-value
+  print("MANOVA is significant - performing univariate ANOVAs:")
+  
+  univariate_results <- data.frame(
+    Variable = character(),
+    F_statistic = numeric(),
+    p_value = numeric(),
+    Significant = logical(),
+    stringsAsFactors = FALSE
+  )
+  
+  for(var in manova_vars) {
+    aov_formula <- as.formula(paste(var, "~ Era"))
+    aov_result <- aov(aov_formula, data = manova_data)
+    aov_summary <- summary(aov_result)
+    
+    f_stat <- aov_summary[[1]][1,4]
+    p_val <- aov_summary[[1]][1,5]
+    
+    univariate_results <- rbind(univariate_results, data.frame(
+      Variable = var,
+      F_statistic = round(f_stat, 3),
+      p_value = round(p_val, 4),
+      Significant = p_val < 0.05
+    ))
+  }
+  
+  # Sort by significance
+  univariate_results <- univariate_results[order(univariate_results$p_value), ]
+  print(univariate_results)
+  
+  # =============================================
+  # 5. POST-HOC ANALYSIS FOR SIGNIFICANT VARIABLES
+  # =============================================
+  print("=== Post-hoc Analysis (Tukey HSD) ===")
+  
+  significant_vars <- univariate_results$Variable[univariate_results$Significant]
+  if(length(significant_vars) > 0) {
+    for(var in significant_vars[1:min(5, length(significant_vars))]) {  # Limit to first 5 significant vars
+      cat("\n--- Post-hoc for", var, "---\n")
+      aov_model <- aov(as.formula(paste(var, "~ Era")), data = manova_data)
+      tukey_result <- TukeyHSD(aov_model)
+      print(tukey_result$Era)
+    }
+  }
+} else {
+  print("MANOVA is not significant - no follow-up tests needed")
+}
+
+# =============================================
+# 6. DESCRIPTIVE STATISTICS BY ERA
+# =============================================
+print("=== Descriptive Statistics by Era ===")
+
+# Calculate means by era for variables in the analysis
+era_means <- manova_data %>%
+  group_by(Era) %>%
+  summarise(
+    n = n(),
+    PTS_mean = round(mean(PTS, na.rm = TRUE), 1),
+    TP_mean = round(mean(TP, na.rm = TRUE), 1),
+    FT_mean = round(mean(FT, na.rm = TRUE), 1),
+    ORB_mean = round(mean(ORB, na.rm = TRUE), 1),
+    DRB_mean = round(mean(DRB, na.rm = TRUE), 1),
+    AST_mean = round(mean(AST, na.rm = TRUE), 1),
+    STL_mean = round(mean(STL, na.rm = TRUE), 1),
+    BLK_mean = round(mean(BLK, na.rm = TRUE), 1),
+    TOV_mean = round(mean(TOV, na.rm = TRUE), 1),
+    .groups = 'drop'
+  )
+
+print("Key Statistics by Era:")
+print(era_means)
+
+# =============================================
+# 7. VISUALIZATION
+# =============================================
+print("=== Creating Visualizations ===")
+
+# Plot showing evolution of key stats across eras
+# Three-point shooting evolution
+p1 <- ggplot(manova_data, aes(x = Era, y = TP, fill = Era)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Three-Point Shots Made Across Eras",
+       x = "Era", y = "Three-Point Shots Made") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Points evolution
+p2 <- ggplot(manova_data, aes(x = Era, y = PTS, fill = Era)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Points Scored Across Eras",
+       x = "Era", y = "Points") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Save plots
+png("era_threept_evolution.png", width = 10, height = 6, units = "in", res = 300)
+print(p1)
+dev.off()
+
+png("era_points_evolution.png", width = 10, height = 6, units = "in", res = 300)
+print(p2)
+dev.off()
+
+# =============================================
+# 8. EFFECT SIZE CALCULATION
+# =============================================
+print("=== Effect Size (Eta-squared) ===")
+
+if(exists("univariate_results") && nrow(univariate_results) > 0) {
+  # Calculate eta-squared for significant variables
+  eta_squared_results <- data.frame(
+    Variable = character(),
+    Eta_Squared = numeric(),
+    Effect_Size = character(),
+    stringsAsFactors = FALSE
+  )
+  
+  for(var in significant_vars[1:min(5, length(significant_vars))]) {
+    aov_model <- aov(as.formula(paste(var, "~ Era")), data = manova_data)
+    ss_total <- sum(aov_model$model[,1]^2) - (sum(aov_model$model[,1])^2)/nrow(aov_model$model)
+    ss_between <- sum(summary(aov_model)[[1]][1,2])
+    eta_sq <- ss_between / ss_total
+    
+    effect_size <- ifelse(eta_sq < 0.01, "Small", 
+                         ifelse(eta_sq < 0.06, "Medium", "Large"))
+    
+    eta_squared_results <- rbind(eta_squared_results, data.frame(
+      Variable = var,
+      Eta_Squared = round(eta_sq, 4),
+      Effect_Size = effect_size
+    ))
+  }
+  
+  print("Effect Sizes for Significant Variables:")
+  print(eta_squared_results)
+}
+
+print("=== MANOVA Analysis Complete ===")
 ```
 
 ```{r}
