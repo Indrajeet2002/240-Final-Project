@@ -10,10 +10,12 @@ library(Hotelling)
 library(factoextra)
 library(FactoMineR)
 library(reshape2)
+library(dplyr)
+library(car)
+library(broom)
 ```
 
 ```{r}
-library(dplyr)
 # Load your dataset
 df <- read.csv("~/Downloads/champs_and_runner_ups_series_averages.csv")
 
@@ -68,12 +70,11 @@ analysis_vars <- c("PTS", "FG", "FGA", "TP", "TPA", "FT", "FTA",
 ```
 
 ```{r}
-# =============================================
+
 # 1. EXPLORATORY DATA ANALYSIS
-# =============================================
 
 # Summary statistics by status
-print("=== Summary Statistics by Status ===")
+print("Summary Statistics by Status")
 summary_stats <- df %>%
   group_by(Status) %>%
   summarise_at(vars(analysis_vars), list(mean = mean, sd = sd), na.rm = TRUE)
@@ -112,11 +113,9 @@ dev.off()
 
 ```{r}
 
-# =============================================
 # 2. HOTELLING'S T-TEST
-# =============================================
 
-print("=== Hotelling's T-Test Analysis ===")
+print("Hotelling's T-Test Analysis")
 
 Hotelling.T2.2sample=function(X, Y){
 n=dim(X)[1]; m=dim(Y)[1]; p=dim(X)[2]
@@ -150,11 +149,9 @@ Hotelling.T2.2sample(champs_matrix, runners_matrix)
 
 ```{r}
 
-# =============================================
 # 3. PRINCIPAL COMPONENT ANALYSIS (PCA)
-# =============================================
 
-print("=== Principal Component Analysis ===")
+print("Principal Component Analysis")
 
 # Prepare data for PCA (standardize variables)
 pca_data <- df[complete.cases(df[analysis_vars]), analysis_vars]
@@ -183,7 +180,7 @@ fviz_pca_biplot(pca_result,
 dev.off()
 
 # Variable contributions to PC1 and PC2
-print("=== Variable Contributions to Principal Components ===")
+print("Variable Contributions to Principal Components")
 var_contrib <- pca_result$var$contrib
 print("Top contributors to PC1:")
 print(sort(var_contrib[,1], decreasing = TRUE)[1:8])
@@ -193,11 +190,9 @@ print(sort(var_contrib[,2], decreasing = TRUE)[1:8])
 ```
 
 ```{r}
-# =============================================
 # 4. LINEAR DISCRIMINANT ANALYSIS (LDA)
-# =============================================
 
-print("=== Linear Discriminant Analysis ===")
+print("Linear Discriminant Analysis")
 
 # Prepare data for LDA
 lda_data <- df[complete.cases(df[c(analysis_vars, "Status")]), c(analysis_vars, "Status")]
@@ -211,7 +206,7 @@ lda_pred <- predict(lda_result)
 
 # Confusion matrix
 confusion_matrix <- table(Actual = lda_data$Status, Predicted = lda_pred$class)
-print("=== LDA Confusion Matrix ===")
+print("LDA Confusion Matrix")
 print(confusion_matrix)
 
 # Classification accuracy
@@ -238,7 +233,7 @@ ggplot(lda_plot_data, aes(x = LD1, y = 0, color = Status)) +
 dev.off()
 
 # Variable importance in LDA
-print("=== LDA Coefficients (Variable Importance) ===")
+print("LDA Coefficients (Variable Importance)")
 lda_coeffs <- data.frame(
   Variable = names(lda_result$scaling[,1]),
   Coefficient = lda_result$scaling[,1]
@@ -247,21 +242,9 @@ lda_coeffs <- lda_coeffs[order(abs(lda_coeffs$Coefficient), decreasing = TRUE), 
 print(lda_coeffs)
 ```
 ```{r}
-# =============================================
 # MANOVA: Basketball Statistics Across Eras
-# =============================================
 
-# Load required libraries
-library(ggplot2)
-library(car)       # For MANOVA functions
-library(broom)     # For tidy output
-
-# Note: dplyr and data preprocessing already done in previous code
-
-# =============================================
-# 1. CREATE ERA VARIABLE
-# =============================================
-print("=== Creating Era Categories ===")
+print("Creating Era Categories")
 
 # Create era categories based on year
 df <- df %>%
@@ -282,10 +265,9 @@ era_counts <- table(df$Era)
 print("Teams per Era:")
 print(era_counts)
 
-# =============================================
-# 2. SELECT VARIABLES FOR MANOVA
-# =============================================
-print("=== Selecting Variables for MANOVA ===")
+
+# SELECT VARIABLES FOR MANOVA
+print("Selecting Variables for MANOVA")
 
 # Remove highly correlated variables to avoid multicollinearity
 # Keep either raw counts OR percentages, not both
@@ -306,7 +288,7 @@ print("Final era distribution:")
 print(table(manova_data$Era))
 
 # Check for multicollinearity
-print("=== Checking for Multicollinearity ===")
+print("Checking for Multicollinearity")
 cor_matrix <- cor(manova_data[manova_vars], use = "complete.obs")
 high_cor <- which(abs(cor_matrix) > 0.95 & cor_matrix != 1, arr.ind = TRUE)
 if(nrow(high_cor) > 0) {
@@ -321,10 +303,9 @@ if(nrow(high_cor) > 0) {
   print("No problematic multicollinearity detected")
 }
 
-# =============================================
-# 3. PERFORM MANOVA TEST
-# =============================================
-print("=== MANOVA Analysis ===")
+
+# PERFORM MANOVA TEST
+print("MANOVA Analysis")
 
 # Create the MANOVA model
 manova_formula <- as.formula(paste("cbind(", paste(manova_vars, collapse = ", "), ") ~ Era"))
@@ -334,20 +315,9 @@ manova_result <- manova(manova_formula, data = manova_data)
 print("MANOVA Results:")
 print(summary(manova_result))
 
-# Test assumptions - Multivariate normality (Box's M test)
-print("=== Testing Assumptions ===")
-if(require(heplots, quietly = TRUE)) {
-  boxm_result <- boxM(manova_data[manova_vars], manova_data$Era)
-  print("Box's M Test for Homogeneity of Covariance Matrices:")
-  print(boxm_result)
-} else {
-  print("Install 'heplots' package for Box's M test")
-}
 
-# =============================================
-# 4. FOLLOW-UP UNIVARIATE TESTS
-# =============================================
-print("=== Univariate ANOVA Follow-up Tests ===")
+# FOLLOW-UP UNIVARIATE TESTS
+print("Univariate ANOVA Follow-up Tests")
 
 # If MANOVA is significant, perform univariate ANOVAs
 manova_summary <- summary(manova_result)
@@ -382,10 +352,8 @@ if(manova_summary$stats[1,6] < 0.05) {  # Check p-value
   univariate_results <- univariate_results[order(univariate_results$p_value), ]
   print(univariate_results)
   
-  # =============================================
-  # 5. POST-HOC ANALYSIS FOR SIGNIFICANT VARIABLES
-  # =============================================
-  print("=== Post-hoc Analysis (Tukey HSD) ===")
+  # POST-HOC ANALYSIS FOR SIGNIFICANT VARIABLES
+  print("Post-hoc Analysis (Tukey HSD)")
   
   significant_vars <- univariate_results$Variable[univariate_results$Significant]
   if(length(significant_vars) > 0) {
@@ -400,10 +368,8 @@ if(manova_summary$stats[1,6] < 0.05) {  # Check p-value
   print("MANOVA is not significant - no follow-up tests needed")
 }
 
-# =============================================
-# 6. DESCRIPTIVE STATISTICS BY ERA
-# =============================================
-print("=== Descriptive Statistics by Era ===")
+# DESCRIPTIVE STATISTICS BY ERA
+print("Descriptive Statistics by Era")
 
 # Calculate means by era for variables in the analysis
 era_means <- manova_data %>%
@@ -425,10 +391,8 @@ era_means <- manova_data %>%
 print("Key Statistics by Era:")
 print(era_means)
 
-# =============================================
-# 7. VISUALIZATION
-# =============================================
-print("=== Creating Visualizations ===")
+# VISUALIZATION
+print("Creating Visualizations")
 
 # Plot showing evolution of key stats across eras
 # Three-point shooting evolution
@@ -456,10 +420,8 @@ png("era_points_evolution.png", width = 10, height = 6, units = "in", res = 300)
 print(p2)
 dev.off()
 
-# =============================================
-# 8. EFFECT SIZE CALCULATION
-# =============================================
-print("=== Effect Size (Eta-squared) ===")
+# EFFECT SIZE CALCULATION
+print("Effect Size (Eta-squared)")
 
 if(exists("univariate_results") && nrow(univariate_results) > 0) {
   # Calculate eta-squared for significant variables
@@ -490,15 +452,12 @@ if(exists("univariate_results") && nrow(univariate_results) > 0) {
   print(eta_squared_results)
 }
 
-print("=== MANOVA Analysis Complete ===")
 ```
 
 ```{r}
-# =============================================
 # 5. SUMMARY AND INSIGHTS
-# =============================================
 
-print("=== KEY FINDINGS SUMMARY ===")
+print("KEY FINDINGS SUMMARY")
 
 # Most discriminating variables from t-tests
 #top_discriminators <- head(t_test_results, 5)
@@ -536,7 +495,5 @@ p2 <- ggplot(head(pc1_loadings, 8), aes(x = reorder(Variable, abs(PC1_Loading)),
 
 grid.arrange(p1, p2, ncol = 2)
 dev.off()
-
-print("Analysis complete! Check the generated PNG files for visualizations.")
 
 ```
